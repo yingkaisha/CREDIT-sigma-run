@@ -1,16 +1,29 @@
+data_preprocessing/qsub*
+data_preprocessing/*.csv
+
+physics/qsub*
+
+verification/DEV*
+verification/QC*
+verification/qsub*
+
 *.png
 *.log
 *.out
 *.err
+
 old/*
 scripts/old/*
+
 *dask-worker*
-*config.yml
+
 
 qsub/*
 qsub/*.out
-qsbu/*.err
+qsub/*.err
+
 x_*
+*xx*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
