@@ -30,3 +30,7 @@ can support the development of AIWP models.
 * NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT) [[link](https://github.com/NCAR/miles-credit)]
 
 * The implementation of conservation schemes in CREDIT [[link](https://github.com/NCAR/miles-credit/blob/main/credit/postblock.py)]
+
+## Navigation
+
+* Results: [TS and SEEPS](https://github.com/yingkaisha/CREDIT-sigma-run/blob/main/visualization/FIG02_TS_SEEPS.ipynb), [quantile-based verification](https://github.com/yingkaisha/CREDIT-sigma-run/blob/main/visualization/FIG03_Histogram.ipynb), [case study](https://github.com/yingkaisha/CREDIT-sigma-run/blob/main/visualization/FIG04_example.ipynb)
