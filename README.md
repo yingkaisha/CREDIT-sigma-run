@@ -23,8 +23,14 @@ can support the development of AIWP models.
 
 * Google Research, Analysis-Ready, Cloud Optimized (ARCO) ERA5 [[link](https://cloud.google.com/storage/docs/public-datasets/era5)]
 
+* Goddard Earth Science Data and Information Science Center (GES-DISC), NASA, Integrated Multi-satellitE Retrievals for Global Precipitation Measurement (IMERG) Final Precipitation L3 daily product (GPM\_3IMERGDF) version 7.0 [[link](https://disc.gsfc.nasa.gov/datasets/GPM_3IMERGDF_07/summary)]
+
 * IFS-HRES and ERA5 climatology from the Weatherbench2 project [[link](https://weatherbench2.readthedocs.io/en/latest/data-guide.html)]
 
 * NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT) [[link](https://github.com/NCAR/miles-credit)]
 
 * The implementation of conservation schemes in CREDIT [[link](https://github.com/NCAR/miles-credit/blob/main/credit/postblock.py)]
+
+## Navigation
+
+* Results: [TS and SEEPS](https://github.com/yingkaisha/CREDIT-sigma-run/blob/main/visualization/FIG02_TS_SEEPS.ipynb), [quantile-based verification](https://github.com/yingkaisha/CREDIT-sigma-run/blob/main/visualization/FIG03_Histogram.ipynb), [case study](https://github.com/yingkaisha/CREDIT-sigma-run/blob/main/visualization/FIG04_example.ipynb)
