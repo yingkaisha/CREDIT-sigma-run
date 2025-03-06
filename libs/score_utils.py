@@ -4,6 +4,9 @@ A collection of functions for computing verification scores
 Content:
     - bootstrap_confidence_intervals
     - zonal_energy_spectrum_sph
+    - compute_ts
+    - compute_ts_land_only
+    - compute_ts_midlat
     
 Yingkai Sha
 ksha@ucar.edu
@@ -160,3 +163,170 @@ def zonal_energy_spectrum_sph(ds_input: xr.Dataset,
         spectrum = spectrum * normalization_factor
     
     return spectrum
+
+def compute_ts(ds_fcst, ds_obs, threshold=0.1, dims=None):
+    """
+    Compute the Threat Score (TS, also known as the Critical Success Index) for 
+    precipitation forecast verification between forecast and observation datasets.
+    
+    TS is defined as:
+    
+        TS = Hits / (Hits + Misses + False Alarms)
+    
+    where:
+        - Hits:        number of times both forecast and observation exceed the threshold.
+        - Misses:      number of times the observation exceeds the threshold but the forecast does not.
+        - False Alarms: number of times the forecast exceeds the threshold but the observation does not.
+    
+    Parameters:
+    -----------
+    ds_fcst : xarray.Dataset
+        Forecast dataset containing the variable 'total_precipitation'.
+    ds_obs : xarray.Dataset
+        Observation (target) dataset containing the variable 'total_precipitation'.
+    threshold : float, optional
+        Threshold value for defining a precipitation event (default is 0.1).
+    dims : list of str, optional
+        List of dimensions over which to aggregate the contingency counts.
+        If None (default), TS is computed over all dimensions of 'total_precipitation'.
+    
+    Returns:
+    --------
+    ts : xarray.DataArray or float
+        The Threat Score. If aggregation is performed over all dimensions,
+        a scalar float is returned; otherwise, a DataArray with the remaining dims.
+    """
+    # Extract the precipitation fields.
+    fcst = ds_fcst["total_precipitation"]
+    obs = ds_obs["total_precipitation"]
+    
+    # Create binary event arrays: True where precipitation is at least the threshold.
+    fcst_event = fcst >= threshold
+    obs_event = obs >= threshold
+    
+    # If no dims are specified, aggregate over all dimensions.
+    if dims is None:
+        dims = list(fcst.dims)
+    
+    # Compute the contingency table components.
+    hits = ((fcst_event) & (obs_event)).sum(dim=dims)
+    misses = ((~fcst_event) & (obs_event)).sum(dim=dims)
+    false_alarms = ((fcst_event) & (~obs_event)).sum(dim=dims)
+    
+    # Compute TS = Hits / (Hits + Misses + False Alarms)
+    denominator = hits + misses + false_alarms
+    ts = xr.where(denominator == 0, np.nan, hits / denominator)
+    
+    # If the result is a 0-dim DataArray, convert it to a scalar.
+    if ts.ndim == 0:
+        # If the underlying data is a Dask array, compute first.
+        if hasattr(ts.data, "compute"):
+            ts = ts.compute().item()
+        else:
+            ts = ts.item()
+    
+    return ts
+
+def compute_ts_land_only(ds_fcst, ds_obs, lsm, threshold=0.1, dims=None):
+    """
+    Compute the Threat Score (TS) for precipitation forecast verification 
+    on land grid points only (where lsm==1).
+    
+    TS (or Critical Success Index) is defined as:
+    
+        TS = Hits / (Hits + Misses + False Alarms)
+    
+    Parameters
+    ----------
+    ds_fcst : xarray.Dataset
+        Forecast dataset containing the variable 'total_precipitation'.
+    ds_obs : xarray.Dataset
+        Observation (target) dataset containing the variable 'total_precipitation'.
+    lsm : numpy.ndarray
+        Land–sea mask with dimensions (latitude, longitude) where gridpoints with lsm==1 
+        are considered land.
+    threshold : float, optional
+        Precipitation threshold to consider an event (default is 0.1).
+    dims : list of str, optional
+        List of dimensions over which to aggregate the contingency counts.
+        If None (default), TS is computed over all dimensions of 'total_precipitation'.
+    
+    Returns
+    -------
+    ts : xarray.DataArray or float
+        The Threat Score computed over the specified dimensions (only for land gridpoints).
+        If aggregation is performed over all dimensions, a scalar float is returned.
+    """
+    # Convert the numpy land-sea mask into an xarray DataArray.
+    # (Assumes that the forecast dataset has 'latitude' and 'longitude' coordinates.)
+    land_mask = xr.DataArray(lsm == 1, 
+                             dims=["latitude", "longitude"],
+                             coords={"latitude": ds_fcst.latitude, "longitude": ds_fcst.longitude})
+    
+    # Extract the precipitation fields from forecast and observation datasets.
+    fcst = ds_fcst["total_precipitation"]
+    obs = ds_obs["total_precipitation"]
+    
+    # Create binary event arrays: True if precipitation >= threshold.
+    fcst_event = fcst >= threshold
+    obs_event = obs >= threshold
+    
+    # If dims is None, aggregate over all dimensions in the variable.
+    if dims is None:
+        dims = list(fcst.dims)
+    
+    # When performing the logical operations, include only grid points where land_mask is True.
+    # Because land_mask is defined only on ('latitude', 'longitude'), it will automatically
+    # broadcast along any extra dimensions (e.g., 'time').
+    hits = ((fcst_event) & (obs_event) & land_mask).sum(dim=dims, skipna=True)
+    misses = ((~fcst_event) & (obs_event) & land_mask).sum(dim=dims, skipna=True)
+    false_alarms = ((fcst_event) & (~obs_event) & land_mask).sum(dim=dims, skipna=True)
+    
+    # Compute TS = Hits / (Hits + Misses + False Alarms), avoiding division by zero.
+    denominator = hits + misses + false_alarms
+    ts = xr.where(denominator == 0, np.nan, hits / denominator)
+    
+    # If the result is 0-dimensional, convert to a Python scalar.
+    if ts.ndim == 0:
+        if hasattr(ts.data, "compute"):
+            ts = ts.compute().item()
+        else:
+            ts = ts.item()
+    
+    return ts
+
+def compute_ts_midlat(ds_fcst, ds_obs, threshold=0.1, dims=None):
+    # Restrict the datasets to latitudes between -60 and 60.
+    # This approach works regardless of whether the latitude coordinate is ascending or descending.
+    ds_fcst = ds_fcst.sel(latitude=ds_fcst.latitude.where((ds_fcst.latitude >= -60) & (ds_fcst.latitude <= 60), drop=True))
+    ds_obs  = ds_obs.sel(latitude=ds_obs.latitude.where((ds_obs.latitude >= -60) & (ds_obs.latitude <= 60), drop=True))
+    
+    # Extract the precipitation fields.
+    fcst = ds_fcst["total_precipitation"]
+    obs  = ds_obs["total_precipitation"]
+    
+    # Create binary event arrays: True where precipitation is at least the threshold.
+    fcst_event = fcst >= threshold
+    obs_event  = obs  >= threshold
+    
+    # If no dims are specified, aggregate over all dimensions.
+    if dims is None:
+        dims = list(fcst.dims)
+    
+    # Compute the contingency table components.
+    hits         = ((fcst_event) & (obs_event)).sum(dim=dims)
+    misses       = ((~fcst_event) & (obs_event)).sum(dim=dims)
+    false_alarms = ((fcst_event) & (~obs_event)).sum(dim=dims)
+    
+    # Compute TS = Hits / (Hits + Misses + False Alarms)
+    denominator = hits + misses + false_alarms
+    ts = xr.where(denominator == 0, np.nan, hits / denominator)
+    
+    # If the result is a 0-dimensional DataArray, convert it to a Python scalar.
+    if ts.ndim == 0:
+        if hasattr(ts.data, "compute"):
+            ts = ts.compute().item()
+        else:
+            ts = ts.item()
+    
+    return ts

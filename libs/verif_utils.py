@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import xarray as xr
+import pandas as pd
 
 def create_dir(path):
     """
@@ -54,6 +55,27 @@ def get_forward_data(filename) -> xr.DataArray:
     dataset = xr.open_zarr(filename, consolidated=True)
     return dataset
     
+
+def accum_6h_24h(ds_ours, ini=0, copy=True):
+    """
+    Convert 6 hourly variables to 24 hour accumulated variables.
+    """
+    h_shift = ini + 6
+    h_convert_ending_time = 24 + ini
+    
+    if copy:
+        ds_ours_shift = ds_ours.copy(deep=True)
+        # convert to start time to work with xarray resample
+        ds_ours_shift['time'] = ds_ours_shift['time'] - pd.Timedelta(hours=h_shift)
+        # accumulate
+        ds_ours_24h = ds_ours_shift.resample(time='24h').sum()
+    else:
+        ds_ours['time'] = ds_ours['time'] - pd.Timedelta(hours=h_shift)
+        ds_ours_24h = ds_ours.resample(time='24h').sum()
+        
+    ds_ours_24h['time'] = ds_ours_24h['time'] + pd.Timedelta(hours=h_convert_ending_time)
+    
+    return ds_ours_24h
 
 def get_nc_files(base_dir, folder_prefix='%Y-%m-%dT%HZ'):
     """
@@ -134,10 +156,157 @@ def ds_subset_everything(ds, variables_levels, time_intervals=None):
         
     return ds_selected
 
+def process_file_group_mlevel(
+    file_list, output_dir, 
+    variables_levels, 
+    time_intervals=None,
+    check_fcst_hour=True,
+    time_encode=True,
+    size_thres=4000000000
+):
+    '''
+    Process a group of netCDF4 files, combining them into a single netCDF4 file.
+
+    Args:
+        file_list: List of NetCDF filenames.
+        output_dir: Directory to save the combined NetCDF4 file.
+        variables_levels, time_intervals: Parameters for subsetting the dataset.
+    '''
+    subdir_name = os.path.basename(os.path.dirname(file_list[0]))
+    print(f"Processing subdirectory: {subdir_name}")
+    
+    # Use folder name as output file name
+    output_file = os.path.join(output_dir, f'{subdir_name}.nc')
+    print(f'Output name: {output_file}')
+
+    # ==================================================================================================== #
+    # Check if the output file already exists and is valid
+    if os.path.exists(output_file):
+        try:
+            # Attempt to open the existing file to check for corruption
+            test_data = xr.open_dataset(output_file)
+            print(f"File {output_file} is valid ... move to file size checks.")
+            # get fcst_hour
+            if check_fcst_hour:
+                fcst_hour = test_data.forecast_hour.values
+            test_data.close()
+
+            # Now check the file size against the threshold
+            if os.path.getsize(output_file) > size_thres:
+                print(f"{output_file} matches the size threshold.")
+
+                if check_fcst_hour:
+                    # Now move to forecast hour check
+                    spacing = np.diff(fcst_hour)
+                    is_equally_spaced = np.allclose(spacing, spacing[0])
+                    is_increasing = np.all(spacing > 0)
+                    if is_equally_spaced and is_increasing:
+                        # True: no need to re-do preprocess
+                        print(f"{output_file} have the correct forecast hours, Skip")
+                        return True
+                    else:
+                        print(f"{output_file} have wrong forecast hours, It will be removed")
+                        os.remove(output_file)
+                else:
+                    # True: no need to re-do preprocess
+                    print(f"{output_file} have the correct size, Skip")
+                    return True
+                
+        except Exception as e:
+            # If the file is corrupted, remove it
+            print(f"Corrupted file: {output_file} detected. Error: {e}. It will be removed.")
+            os.remove(output_file)
+
+    # ==================================================================================================== #
+    # Open multiple NetCDF files as a single dataset and subset to specified variables/levels/time
+    
+    print('A new file will be created ...')
+    
+    try:
+        if variables_levels is not None:
+            ds = xr.open_mfdataset(
+                file_list,
+                combine='by_coords',
+                preprocess=lambda ds: ds_subset_everything(ds, variables_levels, time_intervals),
+                parallel=True,
+                lock=False
+            )
+        else:
+            ds = xr.open_mfdataset(
+                file_list,
+                combine='by_coords',
+                parallel=True,
+                lock=False
+            )
+        
+        # Ensure coordinate names are correct
+        if 'datetime' in ds.coords:
+            ds = ds.rename({'datetime': 'time'})
+        if 'lat' in ds.coords:
+            ds = ds.rename({'lat': 'latitude'})
+        if 'lon' in ds.coords:
+            ds = ds.rename({'lon': 'longitude'})
+            
+        rename_dict = {
+            'specific_total_water': 'specific_total_water_mlevel',
+            'temperature': 'T_mlevel',
+            'u_component_of_wind': 'U_mlevel',
+            'v_component_of_wind': 'V_mlevel',
+            'specific_total_water_Pa': 'specific_total_water',
+            'temperature_Pa': 'T',
+            'u_component_of_wind_Pa': 'U',
+            'v_component_of_wind_Pa': 'V',
+            'Z_Pa': 'Z'}
+        
+        ds = ds.rename(rename_dict)
+        ds = ds.drop_vars('geopotential_at_surface')
+
+        # Save the dataset using NetCDF4 format
+        # encoding = {var: {'zlib': True, 'complevel': 4} for var in ds.data_vars}
+        if time_encode:
+            time_encoding = {
+                "units": "hours since 1900-01-01 00:00:00",
+                "calendar": "gregorian"
+            }
+        
+            ds.to_netcdf(output_file,  
+                         format='NETCDF4', 
+                         encoding={'time': time_encoding}, 
+                         mode='w')
+        else:
+            ds.to_netcdf(output_file, 
+                         format='NETCDF4', 
+                         mode='w')
+        ds.close()
+        print(f"Successfully saved combined dataset to {output_file}")
+    
+    except Exception as e:
+        # Catch any errors in file creation or dataset saving
+        print(f"File creation error: {e}. Incomplete file will be removed.")
+        if os.path.exists(output_file):
+            try:
+                os.remove(output_file)
+                print(f"Incomplete file {output_file} has been removed.")
+            except Exception as remove_error:
+                print(f"Error removing incomplete file {output_file}: {remove_error}")
+    finally:
+        # Ensure dataset is closed to avoid memory leaks
+        try:
+            ds.close()
+        except NameError:
+            # ds was never created because of an error
+            print(f"Dataset object not created. Skipping close.")
+        except Exception as e:
+            print(f"Error closing dataset: {e}")
+    return False
+
+
+
 def process_file_group(file_list, output_dir, 
                        variables_levels, 
                        time_intervals=None,
                        check_fcst_hour=True,
+                       time_encode=True,
                        size_thres=4000000000):
     '''
     Process a group of netCDF4 files, combining them into a single netCDF4 file.
@@ -224,7 +393,20 @@ def process_file_group(file_list, output_dir,
             
         # Save the dataset using NetCDF4 format
         # encoding = {var: {'zlib': True, 'complevel': 4} for var in ds.data_vars}
-        ds.to_netcdf(output_file, format='NETCDF4')
+        if time_encode:
+            time_encoding = {
+                "units": "hours since 1900-01-01 00:00:00",
+                "calendar": "gregorian"
+            }
+        
+            ds.to_netcdf(output_file,  
+                         format='NETCDF4', 
+                         encoding={'time': time_encoding}, 
+                         mode='w')
+        else:
+            ds.to_netcdf(output_file, 
+                         format='NETCDF4', 
+                         mode='w')
         ds.close()
         print(f"Successfully saved combined dataset to {output_file}")
     
@@ -253,6 +435,7 @@ def process_file_group_safe(file_list, output_dir,
                             variables_levels, 
                             time_intervals=None,
                             check_fcst_hour=True,
+                            time_encode=True,
                             size_thres=4000000000):
     '''
     Process a group of netCDF4 files, combining them into a single netCDF4 file.
@@ -339,10 +522,23 @@ def process_file_group_safe(file_list, output_dir,
         for old_name, new_name in coord_mapping.items():
             if old_name in ds.coords:
                 ds = ds.rename({old_name: new_name})
-                
-        # Save the dataset using NetCDF4 format
-        # encoding = {var: {'zlib': True, 'complevel': 4} for var in ds.data_vars}
-        ds.to_netcdf(output_file, format='NETCDF4')  # , encoding=encoding
+
+        if time_encode:
+            time_encoding = {
+                "units": "hours since 1900-01-01 00:00:00",
+                "calendar": "gregorian"
+            }
+        
+            ds.to_netcdf(output_file, 
+                         compute=True, 
+                         format='NETCDF4', 
+                         encoding={'time': time_encoding}, 
+                         mode='w')
+        else:
+            ds.to_netcdf(output_file, 
+                         compute=True, 
+                         format='NETCDF4', 
+                         mode='w')
         ds.close()
         print(f"Successfully saved combined dataset to {output_file}")
         
