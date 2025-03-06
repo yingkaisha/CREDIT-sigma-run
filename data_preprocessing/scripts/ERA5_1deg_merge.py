@@ -41,11 +41,14 @@ fn_fmt_plevel = base_dir_plevel + 'all_in_one/ERA5_plevel_1deg_6h_{}_conserve.za
 fn_fmt_static = base_dir_plevel + 'static/ERA5_plevel_1deg_6h_conserve_static.zarr'
 fn_mean_std = '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
 
-mlevel_picks = [1, 2, 4, 6, 9, 12, 15, 18, 21, 24, 27, 
-                30, 33, 36, 39, 43, 47, 51, 54, 58, 62,
-                66, 70, 74, 77, 81, 84, 87, 90, 93, 97, 
-                100, 104, 107, 111, 114, 116, 119, 122, 
-                124, 126, 128, 131, 133, 136, 137]
+# mlevel_picks = [1, 2, 4, 6, 9, 12, 15, 18, 21, 24, 27, 
+#                 30, 33, 36, 39, 43, 47, 51, 54, 58, 62,
+#                 66, 70, 74, 77, 81, 84, 87, 90, 93, 97, 
+#                 100, 104, 107, 111, 114, 116, 119, 122, 
+#                 124, 126, 128, 131, 133, 136, 137]
+
+mlevel_picks = [  1,   9,  19,  29,  39,  49,  59,  69,  79,
+                 89,  97, 104, 111, 116, 122, 126, 131, 136]
 
 var_mlevel = {
     'specific_humidity': mlevel_picks,
